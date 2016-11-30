@@ -1,4 +1,5 @@
 #include "edmonds.hpp"
+#include <tuple>
 
 namespace ED // for Edmonds
 {
@@ -21,6 +22,7 @@ void edmonds (Graph const &G, std::vector<NodeId> &matching)
     */
    std::vector<int> deleted(G.num_nodes(), 0);
    std::vector<NodeId> prev(G.num_nodes(), invalid_node_id);
+   std::vector<NodeId> rep(G.num_nodes(), invalid_node_id);
    std::vector<lbl_t> label(G.num_nodes(), invalid_lbl);
    std::vector<dist_t> d(G.num_nodes(), invalid_dist);
    std::vector<std::size_t> next_edge_idx(G.num_nodes(), 0);
@@ -31,27 +33,41 @@ void edmonds (Graph const &G, std::vector<NodeId> &matching)
 
       std::vector<LabelData> label_data (1, LabelData(id));
       label[id] = 0;
+      d[id] = 0;
 
       auto augment = [&](NodeId x, NodeId y) -> void {
-         while (matching[x] != invalid_node_id) {
-            NodeId z = matching[x];
-            matching[y] = x;
+         std::vector< std::pair< NodeId, NodeId> > add(1, {x, y});
+         std::size_t idx = 0;
+
+         auto uncover = [&](NodeId v) -> void {
+            if (matching[v] != invalid_node_id) {
+               NodeId w = matching[v];
+               matching[v] = invalid_node_id;
+               matching[w] = invalid_node_id;
+               add.emplace_back(prev[w], rep[w]);
+            }
+         };
+
+         while (idx < add.size()) {
+            std::tie(x, y) = add[idx++];
+            uncover(x);
+            uncover(y);
             matching[x] = y;
-            y = z;
-            x = prev[z];
+            matching[y] = x;
          }
-         matching[y] = x;
-         matching[x] = y;
       };
 
       auto grow = [&](NodeId x, NodeId y) -> void {
          prev[y] = x;
+         rep[y] = y;
          label[y] = label_data.size();
+         d[y] = d[x]+1;
          label_data.emplace_back(y);
 
          NodeId z = matching[y];
          even_vertices.push_back(z);
          label[z] = label_data.size();
+         d[z] = d[y]+1;
          label_data.emplace_back(z);
       };
 
@@ -79,21 +95,27 @@ void edmonds (Graph const &G, std::vector<NodeId> &matching)
             }
          };
 
-         auto root_pseudonode = [&](NodeId id) -> NodeId {
-            return label_data[label[id]].root;
-         };
-
-         if (prev[x] == invalid_node_id) prev[x] = y;
-         if (prev[y] == invalid_node_id) prev[y] = x;
-
+         NodeId pred_x = y, root_x = label_data[label[x]].root;
+         NodeId pred_y = x, root_y = label_data[label[y]].root;
          while (label[x] != label[y]) {
-            if (d[root_pseudonode(x)] > d[root_pseudonode(y)]) std::swap(x, y);
-            NodeId z = matching[root_pseudonode(y)];
-            y = prev[z];
-            if (prev[y] == invalid_node_id) prev[y] = z;
-            even_vertices.push_back(z);
-            labels_found.push_back(label[y]);
-            labels_found.push_back(label[z]);
+            if (d[root_x] < d[root_y]) {
+               std::swap (x, y);
+               std::swap (pred_x, pred_y);
+               std::swap (root_x, root_y);
+            }
+            // root_x is not the root of new pseudonodes, thus set prev and rep
+            prev[root_x] = pred_x;
+            rep[root_x] = x;
+            // pred_x
+            pred_x = matching[root_x];
+            labels_found.push_back(label[pred_x]);
+            d[pred_x] = d[x];
+            even_vertices.push_back(pred_x);
+            // x
+            labels_found.push_back(label[x]);
+            x = prev[pred_x];
+            // root_x 2
+            root_x = label_data[label[x]].root;
          }
          merge_labels(label[x]);
       };
@@ -103,6 +125,7 @@ void edmonds (Graph const &G, std::vector<NodeId> &matching)
             for (NodeId id : data.labeled_vertices) {
                if (augmented) {
                   prev[id] = invalid_node_id;
+                  rep[id] = invalid_node_id;
                   label[id] = invalid_lbl;
                   d[id] = invalid_dist;
                   next_edge_idx[id] = 0;
